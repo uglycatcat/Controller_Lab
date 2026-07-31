@@ -14,6 +14,9 @@ import mujoco
 import mujoco.viewer
 import numpy as np
 
+from controller import Controller, list_controllers, make_controller
+from figure import LiveScope
+
 # ---------------------------------------------------------------------------
 # 路径与仿真参数
 # ---------------------------------------------------------------------------
@@ -23,12 +26,20 @@ SCENE_XML = ROOT / "mjcf" / "scene.xml"
 SIM_DURATION = None  # None = 一直跑；或设为秒数
 RENDER = True
 REALTIME = True  # True=按物理步长墙钟同步，便于手动拖动观察
+PLOT = True  # True=打开 obs/u 滚动示波器（窗口 10 s）
+
+# 控制器插件：改这里即可切换（见 controller.list_controllers()）
+CONTROLLER = "pid"
+CONTROLLER_KWARGS: dict = {}  # 可选，传给控制器构造，如 {"kp_ang": 180.0}
 
 # 初始状态：小车位置 (m)、摆角 (rad，0=竖直向上，π=竖直向下)、速度
 INIT_CART_POS = 0.0
 INIT_POLE_ANGLE = 0.02  # 近直立微扰动；起摆测试可改为 np.pi
 INIT_CART_VEL = 0.0
 INIT_POLE_ANGVEL = 0.0
+
+# 由 make_controller() 在 main() 中创建
+_controller: Controller | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -90,17 +101,18 @@ def step(
 
 
 # ===========================================================================
-# TODO: 在此接入你的控制器
+# 控制器接入点（与具体插件解耦）
 #   输入: obs (np.ndarray, shape=(4,))
-#   输出: u   (float 或 shape=(1,) 的数组)  — 小车水平力
+#   输出: u   (float)  — 小车水平力
 # ===========================================================================
 def compute_control(obs: np.ndarray) -> float:
-    """占位：无控制（开环 u=0）。请替换为你的控制律。"""
-    _ = obs
-    return 0.0
+    assert _controller is not None, "控制器尚未初始化"
+    return float(_controller.compute(obs))
 
 
 def main() -> None:
+    global _controller
+
     if not SCENE_XML.is_file():
         raise FileNotFoundError(f"找不到场景文件: {SCENE_XML}")
 
@@ -113,16 +125,33 @@ def main() -> None:
     )
     assert model.nu == CTRL_DIM, f"期望控制维数 {CTRL_DIM}，实际 nu={model.nu}"
 
+    _controller = make_controller(
+        CONTROLLER,
+        dt=float(model.opt.timestep),
+        **CONTROLLER_KWARGS,
+    )
     obs = reset(model, data)
+    _controller.reset()
+
+    scope: LiveScope | None = None
+    if PLOT:
+        scope = LiveScope(dt=float(model.opt.timestep), window_s=10.0)
+
     print("Cart-Pole 已加载")
     print(f"  timestep = {model.opt.timestep} s")
     print(f"  观测输出 obs = [cart_pos, cart_vel, pole_angle, pole_angvel]")
     print(f"  控制输入 u   = cart_force (N), range={model.actuator_ctrlrange[0]}")
+    print(f"  控制器       = {CONTROLLER}  (可选: {', '.join(list_controllers())})")
+    print(f"  示波器       = {'开 (10 s 窗口)' if scope is not None else '关'}")
     print(f"  初始观测     = {obs}")
 
     def run_loop(viewer=None) -> None:
-        nonlocal obs
-        while viewer is None or viewer.is_running():
+        nonlocal obs, scope
+        while True:
+            if viewer is not None and not viewer.is_running():
+                break
+            if viewer is None and scope is not None and not scope.is_open:
+                break
             if SIM_DURATION is not None and data.time >= SIM_DURATION:
                 break
 
@@ -134,6 +163,12 @@ def main() -> None:
             obs = step(model, data, u)
             # ----------------------
 
+            if scope is not None:
+                if scope.is_open:
+                    scope.push(data.time, obs, u)
+                else:
+                    scope = None
+
             if viewer is not None:
                 viewer.sync()
 
@@ -143,17 +178,21 @@ def main() -> None:
                 if leftover > 0:
                     time.sleep(leftover)
 
-    if RENDER:
-        with mujoco.viewer.launch_passive(model, data) as viewer:
-            # 侧视，便于观察二维运动
-            viewer.cam.lookat[:] = [0.0, 0.0, 0.95]
-            viewer.cam.distance = 3.0
-            viewer.cam.azimuth = 90.0
-            viewer.cam.elevation = -10.0
-            print("提示: 双击选中小车后拖动可施加扰动；仿真已按实时速率运行")
-            run_loop(viewer)
-    else:
-        run_loop(None)
+    try:
+        if RENDER:
+            with mujoco.viewer.launch_passive(model, data) as viewer:
+                # 侧视，便于观察二维运动
+                viewer.cam.lookat[:] = [0.0, 0.0, 0.95]
+                viewer.cam.distance = 3.0
+                viewer.cam.azimuth = 90.0
+                viewer.cam.elevation = -10.0
+                print("提示: 双击选中小车后拖动可施加扰动；仿真已按实时速率运行")
+                run_loop(viewer)
+        else:
+            run_loop(None)
+    finally:
+        if scope is not None:
+            scope.close()
 
     print(f"仿真结束 t={data.time:.3f}s, 最终观测={get_observation(data)}")
 
