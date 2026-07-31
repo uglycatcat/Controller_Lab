@@ -1,0 +1,68 @@
+<!--
+  二维一阶小车倒立摆（Cart-Pole）
+  参数对齐常见教学/基准设定（近似 dm_control / Gym CartPole）：
+    - 小车质量 1.0 kg，摆杆约 0.1 kg，杆长 0.6 m
+    - 铰链近无阻尼，便于能量注入与起摆
+    - 关闭接触，理想平面运动
+-->
+<mujoco model="cartpole">
+  <compiler angle="radian" inertiafromgeom="true"/>
+
+  <option timestep="0.002" gravity="0 0 -9.81" integrator="RK4">
+    <flag contact="disable"/>
+  </option>
+
+  <default>
+    <!-- 默认关节几乎无阻尼，避免默默耗散能量 -->
+    <joint damping="0" armature="0"/>
+    <geom rgba="0.7 0.7 0.7 1" contype="0" conaffinity="0"/>
+  </default>
+
+  <worldbody>
+    <!-- 滑轨（仅可视化） -->
+    <geom name="rail" type="capsule" fromto="-2.5 0 0.7 2.5 0 0.7"
+          size="0.02" rgba="0.3 0.3 0.35 1"
+          contype="0" conaffinity="0"/>
+
+    <!-- 小车：沿 x 轴滑动 -->
+    <body name="cart" pos="0 0 0.7">
+      <!-- 轻微滑轨阻尼，保持可拖动、不过度发黏 -->
+      <joint name="slider" type="slide" axis="1 0 0"
+             limited="true" range="-2.2 2.2" damping="0.1"/>
+      <geom name="cart_geom" type="box" size="0.15 0.08 0.06"
+            mass="1.0" rgba="0.2 0.45 0.85 1"
+            contype="0" conaffinity="0"/>
+      <site name="cart_site" pos="0 0 0" size="0.01"/>
+
+      <!-- 摆杆：θ=0 为竖直向上；质量集中在杆身，顶端小球仅作标记 -->
+      <body name="pole" pos="0 0 0">
+        <joint name="hinge" type="hinge" axis="0 1 0"
+               limited="false" damping="0.01" frictionloss="0.005"/>
+        <geom name="pole_geom" type="capsule" fromto="0 0 0 0 0 0.6"
+              size="0.03" mass="0.1" rgba="0.9 0.35 0.2 1"
+              contype="0" conaffinity="0"/>
+        <geom name="pole_tip" type="sphere" pos="0 0 0.6"
+              size="0.035" mass="0.001" rgba="0.95 0.75 0.2 1"
+              contype="0" conaffinity="0"/>
+        <site name="tip_site" pos="0 0 0.6" size="0.01"/>
+      </body>
+    </body>
+  </worldbody>
+
+  <contact>
+    <exclude body1="cart" body2="pole"/>
+  </contact>
+
+  <!-- 控制力适当加大，便于起摆 / 平衡 -->
+  <actuator>
+    <motor name="cart_force" joint="slider" gear="1"
+           ctrllimited="true" ctrlrange="-50 50"/>
+  </actuator>
+
+  <sensor>
+    <jointpos name="cart_pos" joint="slider"/>
+    <jointvel name="cart_vel" joint="slider"/>
+    <jointpos name="pole_angle" joint="hinge"/>
+    <jointvel name="pole_angvel" joint="hinge"/>
+  </sensor>
+</mujoco>
