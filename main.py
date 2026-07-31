@@ -29,7 +29,7 @@ REALTIME = True  # True=按物理步长墙钟同步，便于手动拖动观察
 PLOT = True  # True=打开 obs/u 滚动示波器（窗口 10 s）
 
 # 控制器插件：改这里即可切换（见 controller.list_controllers()）
-CONTROLLER = "pid"
+CONTROLLER = "smc"
 CONTROLLER_KWARGS: dict = {}  # 可选，传给控制器构造，如 {"kp_ang": 180.0}
 
 # 初始状态：小车位置 (m)、摆角 (rad，0=竖直向上，π=竖直向下)、速度
