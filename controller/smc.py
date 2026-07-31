@@ -23,7 +23,7 @@ class CartPoleSMC:
     def reset(self) -> None:
         pass
 
-    def compute(self, obs: np.ndarray) -> float:
+    def __compute(self, obs: np.ndarray) -> float:
         """TODO: 实现滑模控制律。当前开环 u=0。"""
         # 参数表
         # M为小车质量
@@ -99,7 +99,7 @@ class CartPoleSMC:
 
         # --- 滑模面 s = c1 x + c2 ẋ + c3 θ + c4 θ̇ ---
         # c4 相对 c2 足够大，保证直立附近 β<0，且 θ>0 时 u>0（与本仓库实测一致）
-        c1, c2, c3, c4 = 1.0, 2.2, 18.0, 4.0
+        c1, c2, c3, c4 = 6.0, 2.2, 18.0, 4.0
         s = c1 * x + c2 * dx + c3 * theta + c4 * dtheta
 
         # --- 动力学: A [ẍ, θ̈]ᵀ = [u + φ, ψ]ᵀ，θ=0 为向上不稳定平衡 ---
@@ -132,3 +132,32 @@ class CartPoleSMC:
 
         u = -(alpha + k_reach * s + eta * sat) / beta
         return float(np.clip(u, -u_max, u_max))
+
+    def compute(self, obs: np.ndarray) -> float:
+
+        # --- 与 mjcf/robot_description.xml 对齐的名义参数 ---
+        M = 1.0          # 小车质量 (kg)
+        m = 0.1          # 摆杆质量 (kg)
+        L = 0.6          # 杆几何长度 (m)
+        l = L / 2.0      # 质心到铰链距离 (均匀杆)
+        I = m * L**2 / 12.0  # 绕质心转动惯量
+        b_f = 0.1        # 滑轨阻尼，对应 joint damping
+        g = 9.81
+
+        k1,k2,k3,k4,k,eta,q = 1.0, 2.2, 18.0, 4.0,8.0,6.0,0.08
+        x, dx , theta ,dtheta = (float(v) for v in obs)
+        sin = np.sin(theta)
+        cos = np.cos(theta)
+        s = k1*x+k2*dx+k3*theta+k4*dtheta
+        A = np.array([
+            [M+m,m*l*cos],
+            [m*l*cos,m*l*l+I]
+        ])
+        b_u = np.array([1.0,0.0])
+        b_n = np.array([-b_f*dx+m*l*sin*dtheta*dtheta,m*g*l*sin])
+        beta = np.array([k2,k4]) @ np.linalg.inv(A) @ b_u.T
+        alpha = k1*dx+k3*dtheta + np.array([k2,k4]) @ np.linalg.inv(A) @ b_n.T
+        extra = k*s+eta*np.clip(s/q,-1.0,1.0)
+        if abs(beta) <1e-8:
+            return 0.0
+        return -(alpha+extra)/beta
