@@ -17,6 +17,8 @@ from .registry import list_controllers, make_controller, register
 
 def _load_plugins() -> None:
     """导入内置插件以触发 @register。"""
+    from . import lqr as _lqr  # noqa: F401
+    from . import mpc as _mpc  # noqa: F401
     from . import pid as _pid  # noqa: F401
     from . import smc as _smc  # noqa: F401
 
